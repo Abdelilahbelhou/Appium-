@@ -4,65 +4,120 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.Scanner;
+import java.util.*;
 
 public class App {
+	 private static final String VM_PATH = "C:\\Users\\admin_14\\Netease\\MuMuPlayerGlobal-12.0\\vms\\MuMuPlayerGlobal-12.0-0  ";
 
-    static final int NUMBER_OF_AVDS = 5; // Set this to the desired number of AVDs
-    static final String EMULATOR_PATH = "C:\\Users\\admin_14\\AppData\\Local\\Android\\Sdk\\emulator";
-    static final String MUMU_PLAYER_PATH = "C:\\Program Files\\Netease\\MuMuPlayerGlobal-12.0\\shell";
+    private static final String VM_BASE_PATH = "C:\\Users\\admin_14\\Netease\\MuMuPlayerGlobal-12.0\\vms";
+    private static final String MUMU_PLAYER_EXECUTABLE = "MuMuPlayer.exe";
+    private static Scanner scanner = new Scanner(System.in);
 
-    public static void main(String[] args) throws InterruptedException, IOException {
-        Thread[] threads = new Thread[NUMBER_OF_AVDS];
+    public static void main(String[] args) throws IOException, InterruptedException {
+        try {
+            // Get the number of copies to create
+            int numberOfCopies = getNumberOfCopies();
+            copy(numberOfCopies);
 
-        for (int i = 0; i < NUMBER_OF_AVDS; i++) {
-            final int avdIndex = i;
-            String avdName = "MuMuPlayerGlobal-12.0-" + i;
+            // Get the specific copies the user wants to start
+            List<String> copiesToStart = getCopiesToStart(numberOfCopies);
 
-            threads[i] = new Thread(() -> {
-                try {
-                    System.out.println("Starting emulator: " + avdName);
-                    startEmulator(avdName);
-                    System.out.println("Starting MuMu Player for: " + avdName);
-                    startMuMuPlayer();
-                } catch (IOException e) {
-                    System.err.println("Error during emulator or MuMu Player start: " + e.getMessage());
-                }
-            });
+            // Start the selected copies in separate threads
+            Thread[] threads = new Thread[copiesToStart.size()];
+            for (int i = 0; i < copiesToStart.size(); i++) {
+                final String copy = copiesToStart.get(i);
+                threads[i] = new Thread(() -> {
+                    try {
+                        System.out.println("Starting MuMu Player for: " + copy);
+                        startMuMuPlayer(copy);
+                    } catch (IOException | InterruptedException e) {
+                        System.err.println("Error during MuMu Player start: " + e.getMessage());
+                    }
+                });
+                threads[i].start();
+            }
 
-            threads[i].start(); // Start the thread
+            // Wait for all threads to complete
+            for (Thread thread : threads) {
+                thread.join();
+            }
+
+            // Initialize Appium after the instances have started
+            Base.mconfigurationAppium();
+
+        } catch (InterruptedException e) {
+            System.err.println("Error in main execution: " + e.getMessage());
+        } finally {
+            scanner.close();
         }
-
-        // Wait for all threads to finish
-        for (Thread thread : threads) {
-            thread.join();
-        }
-
-        // Initialize Appium after the emulators have started
-        Base.mconfigurationAppium();
     }
 
-    public static void copy() {
-        try (Scanner scanner = new Scanner(System.in)) {
-            System.out.print("Enter the number of copies you want to create: ");
-            int numberOfCopies = scanner.nextInt();
+    // Get the number of copies from the user
+    private static int getNumberOfCopies() {
+        System.out.print("Enter the number of copies you want to create: ");
+        return scanner.nextInt();
+    }
 
-            Path baseDirectory = Paths.get("C:\\Program Files\\Netease\\MuMuPlayerGlobal-12.0\\shell");
-            Path sourceFolder = baseDirectory.resolve("MuMuPlayerGlobal-12.0-0");
+    // Get the specific copies to start
+    private static List<String> getCopiesToStart(int numberOfCopies) {
+        scanner.nextLine(); // Consume leftover newline from previous input
+        System.out.print("Enter the copy numbers you want to start (comma-separated, e.g., -1, -2): ");
+        String[] selectedCopies = scanner.nextLine().split(",");
 
-            for (int i = 0; i < numberOfCopies; i++) {
-                Path targetDirectory = generateIncrementingTargetDirectory(baseDirectory);
-                try {
-                    copyFolderAutomatically(sourceFolder, targetDirectory);
-                    System.out.println("Folder copied successfully to: " + targetDirectory);
-                } catch (IOException e) {
-                    System.err.println("Failed to copy folder: " + e.getMessage());
+        List<String> validCopies = new ArrayList<>();
+        Path baseDirectory = Paths.get(VM_BASE_PATH);
+
+        for (String copy : selectedCopies) {
+            copy = copy.trim();
+            if (copy.matches("-\\d{1}")) {
+                String fullCopyName = "MuMuPlayerGlobal-12.0" + copy;
+                Path targetDirectory = baseDirectory.resolve(fullCopyName);
+
+                if (Files.exists(targetDirectory) && Files.isDirectory(targetDirectory)) {
+                    validCopies.add(fullCopyName);
+                } else {
+                    System.err.println("Copy does not exist in the folder: " + fullCopyName);
                 }
+            } else {
+                System.err.println("Invalid copy format: " + copy);
+            }
+        }
+
+        return validCopies;
+    }
+
+    // Copy the MuMuPlayer folders
+    private static void copy(int numberOfCopies) {
+        Path sourceFolder = Paths.get(VM_BASE_PATH, "MuMuPlayerGlobal-12.0-0");
+
+        for (int i = 0; i < numberOfCopies; i++) {
+            Path targetDirectory = generateIncrementingTargetDirectory(Paths.get(VM_BASE_PATH));
+            try {
+                copyFolderAutomatically(sourceFolder, targetDirectory);
+                System.out.println("Folder copied successfully to: " + targetDirectory);
+            } catch (IOException e) {
+                System.err.println("Failed to copy folder: " + e.getMessage());
             }
         }
     }
 
+    // Generate incrementing folder paths
     private static Path generateIncrementingTargetDirectory(Path baseTargetDirectory) {
+        int highestNumber = findHighestDirectoryNumber(baseTargetDirectory);
+        int newNumber = highestNumber + 1;
+        Path uniqueTargetDirectory = baseTargetDirectory.resolve("MuMuPlayerGlobal-12.0-" + newNumber);
+
+        try {
+            Files.createDirectories(uniqueTargetDirectory);
+        } catch (IOException e) {
+            System.err.println("Failed to create target directory: " + e.getMessage());
+        }
+
+        return uniqueTargetDirectory;
+    }
+
+    // Find the highest numbered directory in the target path
+    private static int findHighestDirectoryNumber(Path baseTargetDirectory) {
         int highestNumber = 0;
 
         try (DirectoryStream<Path> directoryStream = Files.newDirectoryStream(baseTargetDirectory)) {
@@ -76,8 +131,8 @@ public class App {
                             if (number > highestNumber) {
                                 highestNumber = number;
                             }
-                        } catch (NumberFormatException e) {
-                            // Ignore if the part is not a number
+                        } catch (NumberFormatException ignored) {
+                            // Ignore invalid folder names
                         }
                     }
                 }
@@ -86,29 +141,20 @@ public class App {
             System.err.println("Failed to scan directories: " + e.getMessage());
         }
 
-        int newNumber = highestNumber + 1;
-        Path uniqueTargetDirectory = baseTargetDirectory.resolve("MuMuPlayerGlobal-12.0-" + newNumber);
-
-        try {
-            Files.createDirectories(uniqueTargetDirectory);
-        } catch (IOException e) {
-            System.err.println("Failed to create target directory: " + e.getMessage());
-        }
-
-        return uniqueTargetDirectory;
+        return highestNumber;
     }
 
-    public static void copyFolderAutomatically(Path source, Path target) throws IOException {
+    // Copy folder and its contents
+    private static void copyFolderAutomatically(Path source, Path target) throws IOException {
         Files.walkFileTree(source, new SimpleFileVisitor<Path>() {
             @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
-                Path targetFile = target.resolve(source.relativize(file));
-                Files.copy(file, targetFile, StandardCopyOption.REPLACE_EXISTING);
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.copy(file, target.resolve(source.relativize(file)), StandardCopyOption.REPLACE_EXISTING);
                 return FileVisitResult.CONTINUE;
             }
 
             @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attributes) throws IOException {
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                 Path targetDir = target.resolve(source.relativize(dir));
                 if (Files.notExists(targetDir)) {
                     Files.createDirectory(targetDir);
@@ -118,29 +164,52 @@ public class App {
         });
     }
 
-    private static void startEmulator(String avdName) throws IOException {
+    // Start MuMu Player for a specific instance
+    private static void startMuMuPlayer(String copy) throws IOException, InterruptedException {
+        String muMuPlayerCommand = "start MuMuPlayer.exe";
+
+        // Set the correct path for each MuMu Player instance
+        Path muMuPlayerPath = Paths.get(VM_PATH);
+        ProcessBuilder muMuPlayerProcessBuilder = new ProcessBuilder("cmd.exe", "/c", muMuPlayerCommand);
+        muMuPlayerProcessBuilder.directory(muMuPlayerPath.toFile());  // Change the directory to the specific instance
+
+        Process process = muMuPlayerProcessBuilder.start();
+
+        try {
+            process.getInputStream().transferTo(System.out);
+            process.getErrorStream().transferTo(System.err);
+            process.waitFor();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("MuMu Player process interrupted: " + e.getMessage());
+        } finally {
+            process.destroy();
+        }
+
+        System.out.println("MuMu Player started for: " + copy);
+    }
+}
+
+    /*private static void startEmulator(String avdName) throws IOException {
         String emulatorCommand = "emulator -avd " + avdName + " -netdelay none -netspeed full";
 
         ProcessBuilder emulatorProcessBuilder = new ProcessBuilder("cmd.exe", "/c", emulatorCommand);
         emulatorProcessBuilder.directory(new File(EMULATOR_PATH));
         Process process = emulatorProcessBuilder.start();
-        process.getInputStream().transferTo(System.out);
-        process.getErrorStream().transferTo(System.err);
+
+        try {
+            process.getInputStream().transferTo(System.out);
+            process.getErrorStream().transferTo(System.err);
+            process.waitFor(); // Wait for the process to complete if necessary
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); // Restore the interrupted status
+            System.err.println("Emulator process interrupted: " + e.getMessage());
+        } finally {
+            process.destroy(); // Ensure the process is properly terminated
+        }
+
         System.out.println("Emulator " + avdName + " started in directory " + EMULATOR_PATH);
-    }
-
-    private static void startMuMuPlayer() throws IOException {
-        String muMuPlayerCommand = "start MuMuPlayer.exe";
-
-        ProcessBuilder muMuPlayerProcessBuilder = new ProcessBuilder("cmd.exe", "/c", muMuPlayerCommand);
-        muMuPlayerProcessBuilder.directory(new File(MUMU_PLAYER_PATH));
-        Process process = muMuPlayerProcessBuilder.start();
-        process.getInputStream().transferTo(System.out);
-        process.getErrorStream().transferTo(System.err);
-
-        System.out.println("MuMu Player started from directory " + MUMU_PLAYER_PATH);
-    }
-}
+    }*/
 
 
 /*
